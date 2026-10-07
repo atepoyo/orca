@@ -112,6 +112,9 @@ export async function downloadVerifiedArchive(
         `${label} archive checksum mismatch: expected ${expectedSha256}, got ${actual}`
       )
     }
+  } catch (error) {
+    stall.abort()
+    throw error
   } finally {
     clearTimeout(stallTimer)
   }
