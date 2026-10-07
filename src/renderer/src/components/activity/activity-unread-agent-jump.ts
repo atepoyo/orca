@@ -133,11 +133,9 @@ export function resolveUnreadAgentJumpTargets(
 export function jumpToFirstReachableUnreadAgent(targets: readonly AgentPaneThread[]): void {
   for (const thread of targets) {
     const wasActiveWorkspace = useAppStore.getState().activeWorktreeId === thread.worktree.id
-    const activation = activateActivityThreadTarget(thread)
+    const activation = activateActivityThreadTarget(thread, true)
     if (activation === 'pane') {
-      // Why ack: visiting alone does not clear a waiting or monitoring agent, and the next
-      // press must move on to the next unread agent.
-      useAppStore.getState().acknowledgeAgents([thread.paneKey])
+      // Terminal focus settles next frame; its existing success handler owns acknowledgement.
       return
     }
     // Why stop unread on a fresh workspace: a cold-parked SSH tab revives after activation,

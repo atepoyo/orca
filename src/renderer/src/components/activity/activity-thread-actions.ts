@@ -51,7 +51,10 @@ export function hasActivityThreadWorkspace(
 export type ActivityThreadActivation = 'pane' | 'workspace' | 'none'
 
 /** Focuses a thread's pane the way an Activity row click does. */
-export function activateActivityThreadTarget(thread: AgentPaneThread): ActivityThreadActivation {
+export function activateActivityThreadTarget(
+  thread: AgentPaneThread,
+  acknowledgeOnFocus = false
+): ActivityThreadActivation {
   const isFloatingTerminal = thread.worktree.id === FLOATING_TERMINAL_WORKTREE_ID
   const executionHostId = getActivityThreadExecutionHostId(
     thread,
@@ -72,6 +75,9 @@ export function activateActivityThreadTarget(thread: AgentPaneThread): ActivityT
     return 'none'
   }
   if (activateStructuredAgentSessionTab({ worktreeId: thread.worktree.id, tabId: thread.tab.id })) {
+    if (acknowledgeOnFocus) {
+      useAppStore.getState().acknowledgeAgents([thread.paneKey])
+    }
     return 'pane'
   }
   // Read post-activation: the tab this thread points at may have only just been revived.
@@ -91,7 +97,11 @@ export function activateActivityThreadTarget(thread: AgentPaneThread): ActivityT
   activateTabAndFocusPane(
     thread.tab.id,
     parsed && parsed.tabId === thread.tab.id ? parsed.leafId : null,
-    { flashFocusedPane: true, scrollToBottomIfOutputSinceLastView: true }
+    {
+      ...(acknowledgeOnFocus ? { ackPaneKeyOnSuccess: thread.paneKey } : {}),
+      flashFocusedPane: true,
+      scrollToBottomIfOutputSinceLastView: true
+    }
   )
   return 'pane'
 }

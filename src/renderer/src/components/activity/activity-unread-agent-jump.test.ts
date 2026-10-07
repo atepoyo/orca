@@ -108,6 +108,17 @@ describe('unread agent jump order', () => {
     expect(pick(entries, 'next', { acks: { [PANE_KEY]: NOW - 5_000 } })).toEqual([PANE_KEY_3])
   })
 
+  it('drains waiting agents one at a time without acknowledging their siblings', () => {
+    const entries = [
+      entry(PANE_KEY, 'waiting', NOW - 9_000),
+      entry(PANE_KEY_2, 'blocked', NOW - 100)
+    ]
+
+    expect(pick(entries, 'next')).toEqual([PANE_KEY, PANE_KEY_2])
+    expect(pick(entries, 'next', { acks: { [PANE_KEY]: NOW } })).toEqual([PANE_KEY_2])
+    expect(pick(entries, 'next', { acks: { [PANE_KEY]: NOW, [PANE_KEY_2]: NOW } })).toEqual([])
+  })
+
   it('treats a main agent that finished under a background shell as unread until visited', () => {
     const monitoring = entry(PANE_KEY, 'working', NOW - 9_000, {
       workingMode: 'monitoring',

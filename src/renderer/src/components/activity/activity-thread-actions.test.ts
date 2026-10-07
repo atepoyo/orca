@@ -23,7 +23,11 @@ vi.mock('@/lib/worktree-activation', () => ({
   activateAndRevealWorkspace: mocks.activateAndRevealWorkspace
 }))
 
-import { createActivityThreadActions, hasActivityThreadWorkspace } from './activity-thread-actions'
+import {
+  activateActivityThreadTarget,
+  createActivityThreadActions,
+  hasActivityThreadWorkspace
+} from './activity-thread-actions'
 
 const REMOTE_HOST = 'ssh:devbox' as const
 
@@ -71,6 +75,7 @@ describe('activity thread host routing', () => {
     getKnownWorktreeById.mockReturnValue(thread.worktree)
     state = {
       getKnownWorktreeById,
+      acknowledgeAgents,
       worktreesByRepo: { [thread.worktree.repoId]: [thread.worktree] },
       detectedWorktreesByRepo: {},
       folderWorkspaces: [],
@@ -243,6 +248,37 @@ describe('activity thread host routing', () => {
       worktreeId: thread.worktree.id,
       tabId: thread.tab.id
     })
+    expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
+  })
+
+  it('keeps an unread terminal pending until its exact pane is focused', () => {
+    expect(activateActivityThreadTarget(thread, true)).toBe('pane')
+
+    expect(acknowledgeAgents).not.toHaveBeenCalled()
+    expect(mocks.activateTabAndFocusPane).toHaveBeenCalledWith(
+      thread.tab.id,
+      '11111111-1111-4111-8111-111111111111',
+      {
+        ackPaneKeyOnSuccess: thread.paneKey,
+        flashFocusedPane: true,
+        scrollToBottomIfOutputSinceLastView: true
+      }
+    )
+  })
+
+  it('keeps a cold workspace unread when its terminal is not resident yet', () => {
+    state.tabsByWorktree = { [thread.worktree.id]: [] }
+
+    expect(activateActivityThreadTarget(thread, true)).toBe('workspace')
+    expect(acknowledgeAgents).not.toHaveBeenCalled()
+    expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
+  })
+
+  it('acknowledges only the reached structured agent session', () => {
+    mocks.activateStructuredAgentSessionTab.mockReturnValue(true)
+
+    expect(activateActivityThreadTarget(thread, true)).toBe('pane')
+    expect(acknowledgeAgents).toHaveBeenCalledExactlyOnceWith([thread.paneKey])
     expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
   })
 
