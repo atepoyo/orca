@@ -11,6 +11,7 @@ import {
   type ExecutionHostId
 } from '../../../../shared/execution-host'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
+import { collectLeafIdsInOrder } from '../terminal-pane/terminal-layout-leaf-ids'
 import { findKnownWorktreeById } from '@/store/slices/worktrees/listing/detected-worktree-meta'
 import type { AppState } from '@/store/types'
 import type { AgentPaneThread } from './activity-thread-types'
@@ -50,6 +51,23 @@ export function hasActivityThreadWorkspace(
 /** How far a thread activation got: its pane, only its workspace, or nowhere. */
 export type ActivityThreadActivation = 'pane' | 'workspace' | 'none'
 
+export function hasActivityThreadTerminalPane(
+  thread: AgentPaneThread,
+  state: Pick<AppState, 'tabsByWorktree' | 'terminalLayoutsByTabId'> = useAppStore.getState()
+): boolean {
+  const parsed = parsePaneKey(thread.paneKey)
+  if (
+    !parsed ||
+    parsed.tabId !== thread.tab.id ||
+    !state.tabsByWorktree[thread.worktree.id]?.some((tab) => tab.id === thread.tab.id)
+  ) {
+    return false
+  }
+  // An unmounted layout is unknown; only a populated layout can prove the leaf was closed.
+  const root = state.terminalLayoutsByTabId?.[thread.tab.id]?.root
+  return !root || collectLeafIdsInOrder(root).includes(parsed.leafId)
+}
+
 /** Focuses a thread's pane the way an Activity row click does. */
 export function activateActivityThreadTarget(
   thread: AgentPaneThread,
@@ -87,6 +105,9 @@ export function activateActivityThreadTarget(
     // Retained threads outlive their tab; the workspace is still activated, but there is
     // no pane to focus and focusing a sibling would be worse than focusing nothing.
     return 'workspace'
+  }
+  if (acknowledgeOnFocus && !hasActivityThreadTerminalPane(thread, activated)) {
+    return 'none'
   }
   // Floating tabs have no catalog workspace; reveal their panel without changing the main workspace.
   if (isFloatingTerminal) {

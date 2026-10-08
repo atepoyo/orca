@@ -6,7 +6,11 @@ import { buildActivityEvents } from './activity-event-builder'
 import { projectActivityTabs } from './activity-tab-projection'
 import { buildAgentPaneThreads } from './activity-thread-builder'
 import { collectChildAgentPaneKeys } from './activity-thread-child-agent'
-import { activateActivityThreadTarget, hasActivityThreadWorkspace } from './activity-thread-actions'
+import {
+  activateActivityThreadTarget,
+  hasActivityThreadTerminalPane,
+  hasActivityThreadWorkspace
+} from './activity-thread-actions'
 import { activityThreadStatusId } from './activity-thread-presentation'
 import type { AgentPaneThread } from './activity-thread-types'
 
@@ -123,9 +127,17 @@ export function resolveUnreadAgentJumpTargets(
     buildUnreadAgentJumpThreads(state),
     state.acknowledgedAgentsByPaneKey,
     direction,
-    // Floating tabs have no catalog workspace but are still reachable.
-    (thread) =>
-      thread.worktree.id === FLOATING_TERMINAL_WORKTREE_ID || hasActivityThreadWorkspace(thread)
+    (thread) => {
+      const isFloating = thread.worktree.id === FLOATING_TERMINAL_WORKTREE_ID
+      if (!isFloating && !hasActivityThreadWorkspace(thread)) {
+        return false
+      }
+      const hasTerminalTab = state.tabsByWorktree[thread.worktree.id]?.some(
+        (tab) => tab.id === thread.tab.id
+      )
+      // Cold workspace tabs may revive on activation; floating tabs cannot.
+      return isFloating || hasTerminalTab ? hasActivityThreadTerminalPane(thread, state) : true
+    }
   )
 }
 

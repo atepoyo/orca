@@ -172,7 +172,7 @@ describe('activity thread host routing', () => {
     expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
   })
 
-  it('閉じたフローティング端末を飛ばし、後続の未読エージェントへ移動する', () => {
+  it('skips a closed floating terminal and reaches the next unread agent', () => {
     const floatingThread = makeFloatingThread()
     floatingThread.paneKey = 'tab-closed:22222222-2222-4222-8222-222222222222'
     floatingThread.tab = { ...floatingThread.tab, id: 'tab-closed' }
@@ -197,7 +197,7 @@ describe('activity thread host routing', () => {
     )
   })
 
-  it('開いているフローティング端末へ移動したら後続の未読エージェントへ進まない', () => {
+  it('stops after reaching an open floating terminal', () => {
     const floatingThread = makeFloatingThread()
     state.settings = { floatingTerminalEnabled: true }
     state.floatingWorkspacePanelOpen = false
@@ -221,7 +221,7 @@ describe('activity thread host routing', () => {
     )
   })
 
-  it('休止中のリモートワークスペースは未読のまま復帰を待ち、後続へ進まない', () => {
+  it('waits for a cold remote workspace without acknowledging it or moving on', () => {
     const nextThread: AgentPaneThread = {
       ...thread,
       worktree: { ...thread.worktree, id: 'wt-next' }
@@ -329,6 +329,35 @@ describe('activity thread host routing', () => {
       '11111111-1111-4111-8111-111111111111',
       {
         ackPaneKeyOnSuccess: thread.paneKey,
+        flashFocusedPane: true,
+        scrollToBottomIfOutputSinceLastView: true
+      }
+    )
+  })
+
+  it('skips a closed split pane without focusing or acknowledging its sibling', () => {
+    const nextThread: AgentPaneThread = {
+      ...thread,
+      paneKey: 'tab-2:22222222-2222-4222-8222-222222222222',
+      tab: { ...thread.tab, id: 'tab-2' }
+    }
+    state.tabsByWorktree = { [thread.worktree.id]: [thread.tab, nextThread.tab] }
+    state.terminalLayoutsByTabId = {
+      [thread.tab.id]: {
+        root: { type: 'leaf', leafId: '33333333-3333-4333-8333-333333333333' },
+        activeLeafId: '33333333-3333-4333-8333-333333333333',
+        expandedLeafId: null
+      }
+    }
+
+    jumpToFirstReachableUnreadAgent([thread, nextThread])
+
+    expect(acknowledgeAgents).not.toHaveBeenCalled()
+    expect(mocks.activateTabAndFocusPane).toHaveBeenCalledExactlyOnceWith(
+      nextThread.tab.id,
+      '22222222-2222-4222-8222-222222222222',
+      {
+        ackPaneKeyOnSuccess: nextThread.paneKey,
         flashFocusedPane: true,
         scrollToBottomIfOutputSinceLastView: true
       }

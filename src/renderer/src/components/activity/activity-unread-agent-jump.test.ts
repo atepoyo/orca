@@ -1,11 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AppState } from '@/store/types'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
   type AgentStatusEntry
 } from '../../../../shared/agent-status-types'
 import {
   buildUnreadAgentJumpThreads,
-  orderUnreadAgentJumpTargets
+  orderUnreadAgentJumpTargets,
+  resolveUnreadAgentJumpTargets
 } from './activity-unread-agent-jump'
 import {
   makeRepo,
@@ -16,7 +19,46 @@ import {
   PANE_KEY_3
 } from './ActivityPrototypePage-test-fixtures'
 
+const mocks = vi.hoisted(() => ({ getState: vi.fn() }))
+vi.mock('@/store', () => ({ useAppStore: { getState: mocks.getState } }))
+
 const NOW = 10_000_000
+
+type JumpSource = Parameters<typeof buildUnreadAgentJumpThreads>[0] &
+  Pick<
+    AppState,
+    | 'terminalLayoutsByTabId'
+    | 'detectedWorktreesByRepo'
+    | 'folderWorkspaces'
+    | 'floatingWorkspacePath'
+    | 'settings'
+  >
+
+function makeJumpSource(entries: AgentStatusEntry[]): JumpSource {
+  const repo = makeRepo()
+  const worktree = makeWorktree()
+  return {
+    agentStatusByPaneKey: Object.fromEntries(entries.map((e) => [e.paneKey, e])),
+    runtimeAgentOrchestrationByPaneKey: {},
+    migrationUnsupportedByPtyId: {},
+    retainedAgentsByPaneKey: {},
+    tabsByWorktree: {
+      [worktree.id]: ['tab-1', 'tab-2', 'tab-3'].map((id) => makeTabWithIds(id, worktree.id))
+    },
+    unifiedTabsByWorktree: {},
+    terminalLayoutsByTabId: {},
+    worktreesByRepo: { [repo.id]: [worktree] },
+    detectedWorktreesByRepo: {},
+    folderWorkspaces: [],
+    floatingWorkspacePath: null,
+    settings: null,
+    repos: [repo],
+    getKnownWorktreeById: (id) => (id === worktree.id ? worktree : undefined),
+    acknowledgedAgentsByPaneKey: {},
+    activityClearedAtByPaneKey: {},
+    agentsShowChildAgents: false
+  }
+}
 
 function entry(
   paneKey: string,
@@ -45,29 +87,12 @@ function pick(
     showChildAgents?: boolean
   } = {}
 ): string[] {
-  const repo = makeRepo()
-  const worktree = makeWorktree()
   const acks = options.acks ?? {}
+  const source = makeJumpSource(entries)
+  source.acknowledgedAgentsByPaneKey = acks
+  source.agentsShowChildAgents = options.showChildAgents ?? false
   // Why the real thread builder: the shortcut must agree with what the Activity list marks unread.
-  const threads = buildUnreadAgentJumpThreads(
-    {
-      agentStatusByPaneKey: Object.fromEntries(entries.map((e) => [e.paneKey, e])),
-      runtimeAgentOrchestrationByPaneKey: {},
-      migrationUnsupportedByPtyId: {},
-      retainedAgentsByPaneKey: {},
-      tabsByWorktree: {
-        [worktree.id]: ['tab-1', 'tab-2', 'tab-3'].map((id) => makeTabWithIds(id, worktree.id))
-      },
-      unifiedTabsByWorktree: {},
-      worktreesByRepo: { [repo.id]: [worktree] },
-      repos: [repo],
-      getKnownWorktreeById: () => worktree,
-      acknowledgedAgentsByPaneKey: acks,
-      activityClearedAtByPaneKey: {},
-      agentsShowChildAgents: options.showChildAgents ?? false
-    },
-    NOW
-  )
+  const threads = buildUnreadAgentJumpThreads(source, NOW)
   return orderUnreadAgentJumpTargets(threads, acks, direction, (thread) =>
     options.canOpen ? options.canOpen(thread.paneKey) : true
   ).map((thread) => thread.paneKey)
@@ -151,5 +176,58 @@ describe('unread agent jump order', () => {
 
   it('returns nothing when no agent is unread so the chord reaches the terminal', () => {
     expect(pick([entry(PANE_KEY, 'working', NOW - 100)], 'next')).toEqual([])
+  })
+})
+
+describe('unread agent jump reachability', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns no target for a retained closed floating terminal so the key can pass through', () => {
+    const source = makeJumpSource([])
+    const worktree = { ...makeWorktree(), id: FLOATING_TERMINAL_WORKTREE_ID }
+    const tab = makeTabWithIds('tab-1', worktree.id)
+    source.worktreesByRepo = { [worktree.repoId]: [worktree] }
+    source.tabsByWorktree = {}
+    source.retainedAgentsByPaneKey = {
+      [PANE_KEY]: {
+        entry: entry(PANE_KEY, 'done', NOW - 100),
+        worktreeId: worktree.id,
+        tab,
+        agentType: 'claude',
+        startedAt: NOW - 100
+      }
+    }
+    mocks.getState.mockReturnValue(source)
+
+    expect(resolveUnreadAgentJumpTargets('next')).toEqual([])
+    expect(resolveUnreadAgentJumpTargets('previous')).toEqual([])
+  })
+
+  it('excludes a closed split pane while retaining the next unread agent', () => {
+    const source = makeJumpSource([
+      entry(PANE_KEY, 'done', NOW - 9_000),
+      entry(PANE_KEY_2, 'done', NOW - 100)
+    ])
+    source.terminalLayoutsByTabId = {
+      'tab-1': {
+        root: { type: 'leaf', leafId: '33333333-3333-4333-8333-333333333333' },
+        activeLeafId: '33333333-3333-4333-8333-333333333333',
+        expandedLeafId: null
+      }
+    }
+    mocks.getState.mockReturnValue(source)
+
+    expect(resolveUnreadAgentJumpTargets('next').map((thread) => thread.paneKey)).toEqual([
+      PANE_KEY_2
+    ])
+  })
+
+  it('keeps a resident terminal eligible when its layout has not mounted yet', () => {
+    const source = makeJumpSource([entry(PANE_KEY, 'done', NOW - 100)])
+    mocks.getState.mockReturnValue(source)
+
+    expect(resolveUnreadAgentJumpTargets('next').map((thread) => thread.paneKey)).toEqual([
+      PANE_KEY
+    ])
   })
 })
