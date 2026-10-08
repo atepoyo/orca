@@ -3,6 +3,7 @@ import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
 import { makeRepo, makeTab, makeWorktree } from './ActivityPrototypePage-test-fixtures'
 import type { AgentPaneThread } from './activity-thread-types'
+import { jumpToFirstReachableUnreadAgent } from './activity-unread-agent-jump'
 
 const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
@@ -168,6 +169,74 @@ describe('activity thread host routing', () => {
 
     expect(mocks.activateAndRevealWorkspace).not.toHaveBeenCalled()
     expect(mocks.dispatchEvent).not.toHaveBeenCalled()
+    expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
+  })
+
+  it('閉じたフローティング端末を飛ばし、後続の未読エージェントへ移動する', () => {
+    const floatingThread = makeFloatingThread()
+    floatingThread.paneKey = 'tab-closed:22222222-2222-4222-8222-222222222222'
+    floatingThread.tab = { ...floatingThread.tab, id: 'tab-closed' }
+
+    jumpToFirstReachableUnreadAgent([floatingThread, thread])
+
+    expect(mocks.activateAndRevealWorkspace).toHaveBeenCalledExactlyOnceWith(thread.worktree.id, {
+      executionHostId: REMOTE_HOST,
+      revealInSidebar: false,
+      clearSidebarFilters: false
+    })
+    expect(mocks.dispatchEvent).not.toHaveBeenCalled()
+    expect(acknowledgeAgents).not.toHaveBeenCalled()
+    expect(mocks.activateTabAndFocusPane).toHaveBeenCalledExactlyOnceWith(
+      thread.tab.id,
+      '11111111-1111-4111-8111-111111111111',
+      {
+        ackPaneKeyOnSuccess: thread.paneKey,
+        flashFocusedPane: true,
+        scrollToBottomIfOutputSinceLastView: true
+      }
+    )
+  })
+
+  it('開いているフローティング端末へ移動したら後続の未読エージェントへ進まない', () => {
+    const floatingThread = makeFloatingThread()
+    state.settings = { floatingTerminalEnabled: true }
+    state.floatingWorkspacePanelOpen = false
+    state.tabsByWorktree = { [FLOATING_TERMINAL_WORKTREE_ID]: [floatingThread.tab] }
+
+    jumpToFirstReachableUnreadAgent([floatingThread, thread])
+
+    expect(mocks.activateAndRevealWorkspace).not.toHaveBeenCalled()
+    expect(mocks.dispatchEvent).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ type: TOGGLE_FLOATING_TERMINAL_EVENT })
+    )
+    expect(acknowledgeAgents).not.toHaveBeenCalled()
+    expect(mocks.activateTabAndFocusPane).toHaveBeenCalledExactlyOnceWith(
+      floatingThread.tab.id,
+      '11111111-1111-4111-8111-111111111111',
+      {
+        ackPaneKeyOnSuccess: floatingThread.paneKey,
+        flashFocusedPane: true,
+        scrollToBottomIfOutputSinceLastView: true
+      }
+    )
+  })
+
+  it('休止中のリモートワークスペースは未読のまま復帰を待ち、後続へ進まない', () => {
+    const nextThread: AgentPaneThread = {
+      ...thread,
+      worktree: { ...thread.worktree, id: 'wt-next' }
+    }
+    state.activeWorktreeId = 'wt-other'
+    state.tabsByWorktree = {}
+
+    jumpToFirstReachableUnreadAgent([thread, nextThread])
+
+    expect(mocks.activateAndRevealWorkspace).toHaveBeenCalledExactlyOnceWith(thread.worktree.id, {
+      executionHostId: REMOTE_HOST,
+      revealInSidebar: false,
+      clearSidebarFilters: false
+    })
+    expect(acknowledgeAgents).not.toHaveBeenCalled()
     expect(mocks.activateTabAndFocusPane).not.toHaveBeenCalled()
   })
 

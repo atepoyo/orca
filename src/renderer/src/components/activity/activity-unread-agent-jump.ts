@@ -138,9 +138,12 @@ export function jumpToFirstReachableUnreadAgent(targets: readonly AgentPaneThrea
       // Terminal focus settles next frame; its existing success handler owns acknowledgement.
       return
     }
-    // Why stop unread on a fresh workspace: a cold-parked SSH tab revives after activation,
-    // so the next press can reach it. Already on that workspace means the tab is gone; move on.
-    if (activation === 'workspace' && !wasActiveWorkspace) {
+    // Only a newly activated workspace can revive a cold-parked SSH tab on the next press.
+    if (
+      activation === 'workspace' &&
+      thread.worktree.id !== FLOATING_TERMINAL_WORKTREE_ID &&
+      !wasActiveWorkspace
+    ) {
       return
     }
   }
